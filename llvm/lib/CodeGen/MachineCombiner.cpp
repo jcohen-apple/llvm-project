@@ -109,7 +109,8 @@ private:
   bool preservesResourceLen(MachineBasicBlock *MBB,
                             MachineTraceMetrics::Trace BlockTrace,
                             SmallVectorImpl<MachineInstr *> &InsInstrs,
-                            SmallVectorImpl<MachineInstr *> &DelInstrs);
+                            SmallVectorImpl<MachineInstr *> &DelInstrs,
+                            unsigned Pattern);
   void instr2instrSC(SmallVectorImpl<MachineInstr *> &Instrs,
                      SmallVectorImpl<const MCSchedClassDesc *> &InstrsSC);
   std::pair<unsigned, unsigned>
@@ -230,6 +231,8 @@ MachineCombiner::getDepth(SmallVectorImpl<MachineInstr *> &InsInstrs,
             DefInstr->findRegisterDefOperandIdx(MO.getReg(), /*TRI=*/nullptr);
         int UseIdx =
             InstrPtr->findRegisterUseOperandIdx(MO.getReg(), /*TRI=*/nullptr);
+        LLVM_DEBUG(dbgs() << "Before operand latency 1, "; DefInstr->print(dbgs()); dbgs() << "\n****\n";
+      InstrPtr->print(dbgs()));
         LatencyOp = TSchedModel.computeOperandLatency(DefInstr, DefIdx,
                                                       InstrPtr, UseIdx);
       } else {
@@ -238,7 +241,9 @@ MachineCombiner::getDepth(SmallVectorImpl<MachineInstr *> &InsInstrs,
                              MachineTraceStrategy::TS_Local ||
                          DefInstr->getParent() == &MBB)) {
           DepthOp = BlockTrace.getInstrCycles(*DefInstr).Depth;
-          if (!isTransientMI(DefInstr))
+          if (!isTransientMI(DefInstr)) {
+                    LLVM_DEBUG(dbgs() << "Before operand latency 2, "; DefInstr->print(dbgs()); dbgs() << "\n****\n";
+      InstrPtr->print(dbgs()));
             LatencyOp = TSchedModel.computeOperandLatency(
                 DefInstr,
                 DefInstr->findRegisterDefOperandIdx(MO.getReg(),
@@ -246,6 +251,7 @@ MachineCombiner::getDepth(SmallVectorImpl<MachineInstr *> &InsInstrs,
                 InstrPtr,
                 InstrPtr->findRegisterUseOperandIdx(MO.getReg(),
                                                     /*TRI=*/nullptr));
+          }
         }
       }
       IDepth = std::max(IDepth, DepthOp + LatencyOp);
@@ -373,6 +379,11 @@ bool MachineCombiner::improvesCriticalPathLen(
     LLVM_DEBUG(NewRootDepth < RootDepth
                    ? dbgs() << "\t  and it does it\n"
                    : dbgs() << "\t  but it does NOT do it\n");
+    if (Pattern >= 890) {
+      (errs() << "\tIt MustReduceDepth ");
+      (NewRootDepth < RootDepth ? errs() << "\t  and it does it\n"
+                                : errs() << "\t  but it does NOT do it\n");
+    }
     return NewRootDepth < RootDepth;
   }
 
@@ -425,7 +436,7 @@ void MachineCombiner::instr2instrSC(
 bool MachineCombiner::preservesResourceLen(
     MachineBasicBlock *MBB, MachineTraceMetrics::Trace BlockTrace,
     SmallVectorImpl<MachineInstr *> &InsInstrs,
-    SmallVectorImpl<MachineInstr *> &DelInstrs) {
+    SmallVectorImpl<MachineInstr *> &DelInstrs, unsigned Pattern) {
   if (!TSchedModel.hasInstrSchedModel())
     return true;
 
@@ -460,6 +471,16 @@ bool MachineCombiner::preservesResourceLen(
           : dbgs() << "\t\t  As result it DOES NOT improve/preserve Resource "
                       "Length\n");
 
+  if (Pattern >= 890) {
+    (errs() << "\t\tResource length before replacement: " << ResLenBeforeCombine
+            << " and after: " << ResLenAfterCombine << "\n");
+    (ResLenAfterCombine <=
+             ResLenBeforeCombine + TII->getExtendResourceLenLimit()
+         ? errs() << "\t\t  As result it IMPROVES/PRESERVES Resource Length\n"
+         : errs() << "\t\t  As result it DOES NOT improve/preserve Resource "
+                     "Length\n");
+    return true;
+  }
   return ResLenAfterCombine <=
          ResLenBeforeCombine + TII->getExtendResourceLenLimit();
 }
@@ -687,7 +708,7 @@ bool MachineCombiner::combineInstructions(MachineBasicBlock *MBB) {
         if (improvesCriticalPathLen(MBB, &MI, BlockTrace, InsInstrs, DelInstrs,
                                     InstrIdxForVirtReg, P,
                                     !IncrementalUpdate) &&
-            preservesResourceLen(MBB, BlockTrace, InsInstrs, DelInstrs)) {
+            preservesResourceLen(MBB, BlockTrace, InsInstrs, DelInstrs, P)) {
           if (MBB->size() > inc_threshold) {
             // Use incremental depth updates for basic blocks above treshold
             IncrementalUpdate = true;
@@ -699,7 +720,13 @@ bool MachineCombiner::combineInstructions(MachineBasicBlock *MBB) {
 
           // Eagerly stop after the first pattern fires.
           Changed = true;
+          if (P >= 890) {
+            errs() << "Applied pattern\n";
+          }
           break;
+        } else {
+          if (P >= 890)
+            errs() << "Failed to apply pattern\n";
         }
         // Cleanup instructions of the alternative code sequence. There is no
         // use for them.

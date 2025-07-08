@@ -7540,9 +7540,6 @@ AArch64InstrInfo::getCombinerObjective(unsigned Pattern) const {
   switch (Pattern) {
   case AArch64MachineCombinerPattern::SUBADD_OP1:
   case AArch64MachineCombinerPattern::SUBADD_OP2:
-  case AArch64MachineCombinerPattern::GATHER_i32:
-  case AArch64MachineCombinerPattern::GATHER_i16:
-  case AArch64MachineCombinerPattern::GATHER_i8:
     return CombinerObjective::MustReduceDepth;
   default:
     return TargetInstrInfo::getCombinerObjective(Pattern);
@@ -8908,9 +8905,6 @@ void AArch64InstrInfo::genAlternativeCodeSequence(
   }
   case AArch64MachineCombinerPattern::GATHER_i32: {
     generateGatherPattern(Root, InsInstrs, DelInstrs, InstrIdxForVirtReg, Pattern, 4);
-    for (const auto Instr : DelInstrs) {
-      Instr->print(llvm::errs());
-    }
     break;
   }
   case AArch64MachineCombinerPattern::GATHER_i16: {
