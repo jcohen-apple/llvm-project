@@ -670,13 +670,18 @@ def : InstRW<[WriteVLD, WriteVLD, WriteVLD, WriteVLD],
 def : InstRW<[WriteVLD, WriteAdr, WriteVLD, WriteVLD, WriteVLD],
              (instregex "LD1Fourv(16b|8h|4s|2d)_POST")>;
 
-def : InstRW<[WriteVLDShuffle, ReadVLD],
+def CyWriteLD1i : SchedWriteRes<[CyUnitLS, CyUnitV]> {
+  let Latency = 4;
+  let NumMicroOps = 2;
+}
+
+def : InstRW<[CyWriteLD1i],
              (instregex "LD1i(8|16|32)$")>;
-def : InstRW<[WriteVLDShuffle, ReadVLD, WriteAdr],
+def : InstRW<[CyWriteLD1i, WriteAdr],
              (instregex "LD1i(8|16|32)_POST")>;
 
-def : InstRW<[WriteVLDShuffle, ReadVLD],          (instrs LD1i64)>;
-def : InstRW<[WriteVLDShuffle, ReadVLD, WriteAdr],(instrs LD1i64_POST)>;
+def : InstRW<[CyWriteLD1i],          (instrs LD1i64)>;
+def : InstRW<[CyWriteLD1i, WriteAdr],(instrs LD1i64_POST)>;
 
 def : InstRW<[WriteVLDShuffle],
              (instregex "LD1Rv(8b|4h|2s|1d|16b|8h|4s|2d)$")>;
