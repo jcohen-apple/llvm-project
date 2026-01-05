@@ -23,6 +23,7 @@
 #include "llvm/ADT/SparseSet.h"
 #include "llvm/ADT/Statistic.h"
 #include "llvm/Analysis/OptimizationRemarkEmitter.h"
+#include "llvm/CodeGen/MachineBasicBlock.h"
 #include "llvm/CodeGen/MachineBranchProbabilityInfo.h"
 #include "llvm/CodeGen/MachineDominators.h"
 #include "llvm/CodeGen/MachineFunction.h"
@@ -62,6 +63,11 @@ static cl::opt<bool> EnableHardToPredictAnalysis(
     "enable-early-ifcvt-hard-to-predict", cl::Hidden, cl::init(true),
     cl::desc("Enable hard-to-predict branch analysis for if-conversion"));
 
+// Enable the mispredict bonus for cascading conditionals.
+static cl::opt<bool> EnableMispredictBonus(
+    "enable-early-ifcvt-mispredict-bonus", cl::Hidden, cl::init(true),
+    cl::desc("Enable mispredict bonus for cascading conditionals"));
+
 // Limit the number steps we take when searching conditions that depend on
 // values recently loaded from memory
 static cl::opt<unsigned>
@@ -76,6 +82,8 @@ STATISTIC(NumTrianglesConv, "Number of triangles converted");
 STATISTIC(NumDataDependant,
           "Number of data dependent conditional branches encountered");
 STATISTIC(NumLikelyBiased, "Number of branches with a hot path encountered");
+STATISTIC(NumConvDueToMispredictBonus,
+          "Number of conversions enabled by mispredict bonus");
 
 //===----------------------------------------------------------------------===//
 //                                 SSAIfConv
@@ -841,8 +849,10 @@ private:
   bool tryConvertIf(MachineBasicBlock *);
   void invalidateTraces();
   bool shouldConvertIf();
-  bool isConditionDataDependent();
+  bool isConditionDataDependent(MachineBasicBlock *MBB);
+  bool isConditionLoopInvariant(const MachineBasicBlock *MBB);
   bool doOperandsComeFromMemory(Register Reg);
+  unsigned countBranchesInTrace(MachineTraceMetrics::Trace &HeadTrace);
 };
 
 class EarlyIfConverterLegacy : public MachineFunctionPass {
@@ -984,37 +994,100 @@ bool EarlyIfConverter::doOperandsComeFromMemory(Register Reg) {
 }
 
 /// Check if the branch condition is data-dependent (comes from memory loads).
-bool EarlyIfConverter::isConditionDataDependent() {
+bool EarlyIfConverter::isConditionDataDependent(MachineBasicBlock *MBB) {
   TargetInstrInfo::MachineBranchPredicate MBP;
-  if (TII->analyzeBranchPredicate(*IfConv.Head, MBP, /*AllowModify=*/false))
+  if (TII->analyzeBranchPredicate(*MBB, MBP, /*AllowModify=*/false))
     return false;
 
   if (!MBP.ConditionDef)
     return false;
 
+  // Get the successors of MBB to check edge probabilities.
+  MachineBasicBlock *TBB = MBP.TrueDest;
+  MachineBasicBlock *FBB = MBP.FalseDest;
+  if (!TBB)
+    return false;
+
+  // If FBB is null, the false branch falls through to the next block.
+  if (!FBB) {
+    auto It = llvm::find_if(MBB->successors(), [TBB](auto *S) { return S != TBB; });
+    FBB = It != MBB->succ_end() ? *It : nullptr;
+  }
+
+  if (!FBB)
+    return false;
+
   // If we have a high probability (>50%) of jumping to either TBB or FBB don't
   // if convert. We assume that likely taken branches will be easier
   // to predict.
-  LLVM_DEBUG(dbgs() << "Edge probabilities: Head->TBB = "
-                    << MBPI->getEdgeProbability(IfConv.Head, IfConv.TBB)
-                    << ", Head->FBB = "
-                    << MBPI->getEdgeProbability(IfConv.Head, IfConv.FBB)
-                    << "\n");
+  LLVM_DEBUG(dbgs() << "Edge probabilities: " << printMBBReference(*MBB)
+                    << "->TBB = " << MBPI->getEdgeProbability(MBB, TBB) << ", "
+                    << printMBBReference(*MBB) << "->FBB = "
+                    << MBPI->getEdgeProbability(MBB, FBB) << "\n");
   BranchProbability Threshold(1, 2); // 50%
-  if (MBPI->getEdgeProbability(IfConv.Head, IfConv.TBB) > Threshold ||
-      MBPI->getEdgeProbability(IfConv.Head, IfConv.FBB) > Threshold) {
+  if (MBPI->getEdgeProbability(MBB, TBB) > Threshold ||
+      MBPI->getEdgeProbability(MBB, FBB) > Threshold) {
     LLVM_DEBUG(dbgs() << "Branch probability exceeds 50% threshold\n");
     ++NumLikelyBiased;
     return false;
   }
 
-  // Check if ConditionDef itself is a load (e.g., CBZ with loaded value).
-  if (doOperandsComeFromMemory(MBP.ConditionDef->getOperand(0).getReg())) {
-    ++NumDataDependant;
-    return true;
+  // Check if any of ConditionDef's input operands come from memory loads.
+  LLVM_DEBUG(dbgs() << "  Checking doOperandsComeFromMemory for "
+                    << printMBBReference(*MBB)
+                    << " ConditionDef: " << *MBP.ConditionDef);
+  for (const MachineOperand &MO : MBP.ConditionDef->operands()) {
+    if (!MO.isReg() || !MO.isUse())
+      continue;
+    if (doOperandsComeFromMemory(MO.getReg())) {
+      ++NumDataDependant;
+      return true;
+    }
   }
 
+  LLVM_DEBUG(dbgs() << "  doOperandsComeFromMemory returned false for "
+                    << printMBBReference(*MBB) << "\n");
   return false;
+}
+
+/// Count the number of branches from trace start to Head by walking backwards
+/// through the trace. Only count predecessors that dominate Head to avoid
+/// counting backedges.
+unsigned
+EarlyIfConverter::countBranchesInTrace(MachineTraceMetrics::Trace &HeadTrace) {
+  const MachineInstr &HeadTerminator = *IfConv.Head->getFirstTerminator();
+  unsigned NumBranches = 0;
+  SmallPtrSet<MachineBasicBlock *, 8> Visited;
+  for (MachineBasicBlock *MBB = IfConv.Head; MBB != nullptr;) {
+    if (!Visited.insert(MBB).second)
+      break;
+
+    MachineBasicBlock *TracePred = nullptr;
+    for (MachineBasicBlock *Pred : MBB->predecessors()) {
+      if (Pred->empty())
+        continue;
+      if (!DomTree->dominates(Pred, IfConv.Head))
+        continue;
+
+      const MachineInstr &PredMI = Pred->back();
+      if (HeadTrace.isDepInTrace(PredMI, HeadTerminator)) {
+        TracePred = Pred;
+        break;
+      }
+    }
+    if (!TracePred)
+      break;
+
+    bool LoopInvariant = isConditionLoopInvariant(TracePred);
+    bool DataDependent = isConditionDataDependent(TracePred);
+    LLVM_DEBUG(dbgs() << "TracePred " << printMBBReference(*TracePred)
+                      << ": LoopInvariant=" << LoopInvariant
+                      << ", DataDependent=" << DataDependent << "\n");
+    if (!LoopInvariant && DataDependent)
+      ++NumBranches;
+    MBB = TracePred;
+  }
+  return NumBranches;
 }
 
 // Adjust cycles with downward saturation.
@@ -1035,6 +1108,50 @@ template <typename Remark> Remark &operator<<(Remark &R, Cycles C) {
 }
 } // anonymous namespace
 
+/// Check if the branch condition is loop-invariant and thus likely predictable.
+/// If the condition is in a loop, consider it predictable if the condition
+/// itself or all its operands are loop-invariant. E.g. this considers a load
+/// from a loop-invariant address predictable; we were unable to prove that it
+/// doesn't alias any of the memory-writes in the loop, but it is likely to
+/// read the same value multiple times.
+bool EarlyIfConverter::isConditionLoopInvariant(const MachineBasicBlock *MBB) {
+  MachineLoop *CurrentLoop = Loops->getLoopFor(MBB);
+  if (!CurrentLoop)
+    return false;
+
+  // Analyze the branch of MBB to get its condition.
+  MachineBasicBlock *TBB = nullptr, *FBB = nullptr;
+  SmallVector<MachineOperand, 4> Cond;
+  if (TII->analyzeBranch(*const_cast<MachineBasicBlock *>(MBB), TBB, FBB, Cond))
+    return false;
+
+  if (Cond.empty())
+    return false;
+
+  return any_of(Cond, [&](MachineOperand &MO) {
+    if (!MO.isReg() || !MO.isUse())
+      return false;
+    Register Reg = MO.getReg();
+    if (Reg.isPhysical())
+      return false;
+
+    MachineInstr *Def = MRI->getVRegDef(Reg);
+    return CurrentLoop->isLoopInvariant(*Def) ||
+           all_of(Def->operands(), [&](MachineOperand &Op) {
+             if (Op.isImm())
+               return true;
+             if (!Op.isReg() || !Op.isUse())
+               return true;
+             Register OpReg = Op.getReg();
+             if (OpReg.isPhysical())
+               return false;
+
+             MachineInstr *OpDef = MRI->getVRegDef(OpReg);
+             return CurrentLoop->isLoopInvariant(*OpDef);
+           });
+  });
+}
+
 /// Apply cost model and heuristics to the if-conversion in IfConv.
 /// Return true if the conversion is a good idea.
 ///
@@ -1045,34 +1162,7 @@ bool EarlyIfConverter::shouldConvertIf() {
 
   // Do not try to if-convert if the condition has a high chance of being
   // predictable.
-  MachineLoop *CurrentLoop = Loops->getLoopFor(IfConv.Head);
-  // If the condition is in a loop, consider it predictable if the condition
-  // itself or all its operands are loop-invariant. E.g. this considers a load
-  // from a loop-invariant address predictable; we were unable to prove that it
-  // doesn't alias any of the memory-writes in the loop, but it is likely to
-  // read to same value multiple times.
-  if (CurrentLoop && any_of(IfConv.Cond, [&](MachineOperand &MO) {
-        if (!MO.isReg() || !MO.isUse())
-          return false;
-        Register Reg = MO.getReg();
-        if (Reg.isPhysical())
-          return false;
-
-        MachineInstr *Def = MRI->getVRegDef(Reg);
-        return CurrentLoop->isLoopInvariant(*Def) ||
-               all_of(Def->operands(), [&](MachineOperand &Op) {
-                 if (Op.isImm())
-                   return true;
-                 if (!Op.isReg() || !Op.isUse())
-                   return true;
-                 Register Reg = Op.getReg();
-                 if (Reg.isPhysical())
-                   return false;
-
-                 MachineInstr *Def = MRI->getVRegDef(Reg);
-                 return CurrentLoop->isLoopInvariant(*Def);
-               });
-      }))
+  if (isConditionLoopInvariant(IfConv.Head))
     return false;
 
   // If we have a high probability (>50%) of jumping to either TBB or FBB don't
@@ -1105,7 +1195,7 @@ bool EarlyIfConverter::shouldConvertIf() {
   // hard-to-predict branches, half for others. Otherwise use half for all.
   bool DataDependent = false;
   if (EnableHardToPredictAnalysis)
-    DataDependent = isConditionDataDependent();
+    DataDependent = isConditionDataDependent(IfConv.Head);
 
   unsigned CritLimit = DataDependent ? SchedModel.MispredictPenalty
                                      : SchedModel.MispredictPenalty / 2;
@@ -1169,10 +1259,29 @@ bool EarlyIfConverter::shouldConvertIf() {
   CriticalPathInfo TBlock{};
   CriticalPathInfo FBlock{};
   bool ShouldConvert = true;
+
+  // For the case where we have cascading conditional branches encourage
+  // if-conversion by adding a factor based on the depth of Head in the cascade.
+  // For each level of branch depth add an arbitrary factor of 25% of the
+  // mispredict penalty.
+  unsigned MispredictBonus = 0;
+  if (EnableMispredictBonus) {
+    unsigned NumBranches = countBranchesInTrace(HeadTrace);
+    MispredictBonus = (NumBranches * SchedModel.MispredictPenalty * 25) / 100;
+    LLVM_DEBUG(dbgs() << "NumBranches to Head: " << NumBranches
+                      << ", MispredictPenalty: " << SchedModel.MispredictPenalty
+                      << ", MispredictBonus: " << MispredictBonus << "\n");
+  }
+
+  bool WouldFailWithoutBonus = false;
+
   for (SSAIfConv::PHIInfo &PI : IfConv.PHIs) {
     unsigned Slack = TailTrace.getInstrSlack(*PI.PHI);
-    unsigned MaxDepth = Slack + TailTrace.getInstrCycles(*PI.PHI).Depth;
-    LLVM_DEBUG(dbgs() << "Slack " << Slack << ":\t" << *PI.PHI);
+    unsigned BaseDepth = TailTrace.getInstrCycles(*PI.PHI).Depth;
+    unsigned MaxDepth = Slack + BaseDepth + MispredictBonus;
+    LLVM_DEBUG(dbgs() << "Slack=" << Slack << ", BaseDepth=" << BaseDepth
+                      << ", MispredictBonus=" << MispredictBonus
+                      << ", MaxDepth=" << MaxDepth << ":\t" << *PI.PHI);
 
     // The condition is pulled into the critical path.
     unsigned CondDepth = adjCycles(BranchDepth, PI.CondCycles);
@@ -1181,9 +1290,15 @@ bool EarlyIfConverter::shouldConvertIf() {
       LLVM_DEBUG(dbgs() << "Condition adds " << Extra << " cycles.\n");
       if (Extra > Cond.Extra)
         Cond = {Extra, CondDepth};
-      if (Extra > CritLimit) {
-        LLVM_DEBUG(dbgs() << "Exceeds limit of " << CritLimit << '\n');
+      if (Extra > CritLimit + MispredictBonus) {
+        LLVM_DEBUG(dbgs() << "Exceeds limit of " << CritLimit
+                          << " + MispredictBonus " << MispredictBonus << '\n');
         ShouldConvert = false;
+      } else if (Extra > CritLimit) {
+        WouldFailWithoutBonus = true;
+        LLVM_DEBUG(
+            dbgs()
+            << "Condition would exceed limit without mispredict bonus\n");
       }
     }
 
@@ -1194,9 +1309,14 @@ bool EarlyIfConverter::shouldConvertIf() {
       LLVM_DEBUG(dbgs() << "TBB data adds " << Extra << " cycles.\n");
       if (Extra > TBlock.Extra)
         TBlock = {Extra, TDepth};
-      if (Extra > CritLimit) {
-        LLVM_DEBUG(dbgs() << "Exceeds limit of " << CritLimit << '\n');
+      if (Extra > CritLimit + MispredictBonus) {
+        LLVM_DEBUG(dbgs() << "Exceeds limit of " << CritLimit
+                          << " + MispredictBonus " << MispredictBonus << '\n');
         ShouldConvert = false;
+      } else if (Extra > CritLimit) {
+        WouldFailWithoutBonus = true;
+        LLVM_DEBUG(
+            dbgs() << "TBB would exceed limit without mispredict bonus\n");
       }
     }
 
@@ -1207,9 +1327,14 @@ bool EarlyIfConverter::shouldConvertIf() {
       LLVM_DEBUG(dbgs() << "FBB data adds " << Extra << " cycles.\n");
       if (Extra > FBlock.Extra)
         FBlock = {Extra, FDepth};
-      if (Extra > CritLimit) {
-        LLVM_DEBUG(dbgs() << "Exceeds limit of " << CritLimit << '\n');
+      if (Extra > CritLimit + MispredictBonus) {
+        LLVM_DEBUG(dbgs() << "Exceeds limit of " << CritLimit
+                          << " + MispredictBonus " << MispredictBonus << '\n');
         ShouldConvert = false;
+      } else if (Extra > CritLimit) {
+        WouldFailWithoutBonus = true;
+        LLVM_DEBUG(
+            dbgs() << "FBB would exceed limit without mispredict bonus\n");
       }
     }
   }
@@ -1259,6 +1384,12 @@ bool EarlyIfConverter::shouldConvertIf() {
       R << ".";
       return R;
     });
+  }
+
+  // Track conversions enabled by the cascading mispredict bonus.
+  if (ShouldConvert && WouldFailWithoutBonus) {
+    ++NumConvDueToMispredictBonus;
+    LLVM_DEBUG(dbgs() << "Conversion enabled by mispredict bonus\n");
   }
 
   return ShouldConvert;
