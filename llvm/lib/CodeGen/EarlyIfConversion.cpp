@@ -958,7 +958,8 @@ bool EarlyIfConverter::doOperandsComeFromMemory(Register Reg) {
       continue;
 
     // Check if this instruction is a load.
-    if (MI->mayLoad() && !isConstantPoolLoad(MI))
+    if (MI->mayLoad() && !isConstantPoolLoad(MI) &&
+        !MI->isDereferenceableInvariantLoad())
       return true;
 
     // Walk through all register use operands and find their definitions.
