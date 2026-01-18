@@ -218,7 +218,7 @@ body:             |
     %6:gpr64 = COPY $x0
 
   bb.1:
-    successors: %bb.3(0x30000000), %bb.2(0x50000000)
+    successors: %bb.3(0x40000000), %bb.2(0x40000000)
 
     %0:gpr64sp = PHI %6, %bb.0, %5, %bb.3
     %11:gpr32 = LDRBBui %0, 0 :: (load (s8))

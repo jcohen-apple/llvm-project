@@ -38,6 +38,7 @@
 #include "llvm/CodeGen/TargetRegisterInfo.h"
 #include "llvm/CodeGen/TargetSubtargetInfo.h"
 #include "llvm/InitializePasses.h"
+#include "llvm/Support/BranchProbability.h"
 #include "llvm/Support/CommandLine.h"
 #include "llvm/Support/Debug.h"
 #include "llvm/Support/raw_ostream.h"
@@ -991,12 +992,18 @@ bool EarlyIfConverter::isConditionDataDependent() {
   if (!MBP.ConditionDef)
     return false;
 
-  // If the branch is biased (not 50/50), don't consider it data dependent.
-  // This is to prevent converting unprofitable checks such as
-  // `x[i] != 0;`
-  auto TBBProb = MBPI->getEdgeProbability(IfConv.Head, IfConv.TBB);
-  auto FBBProb = MBPI->getEdgeProbability(IfConv.Head, IfConv.FBB);
-  if (TBBProb != FBBProb) {
+  // If we have a high probability (>50%) of jumping to either TBB or FBB don't
+  // if convert. We assume that likely taken branches will be easier
+  // to predict.
+  LLVM_DEBUG(dbgs() << "Edge probabilities: Head->TBB = "
+                    << MBPI->getEdgeProbability(IfConv.Head, IfConv.TBB)
+                    << ", Head->FBB = "
+                    << MBPI->getEdgeProbability(IfConv.Head, IfConv.FBB)
+                    << "\n");
+  BranchProbability Threshold(1, 2); // 50%
+  if (MBPI->getEdgeProbability(IfConv.Head, IfConv.TBB) > Threshold ||
+      MBPI->getEdgeProbability(IfConv.Head, IfConv.FBB) > Threshold) {
+    LLVM_DEBUG(dbgs() << "Branch probability exceeds 50% threshold\n");
     ++NumLikelyBiased;
     return false;
   }
@@ -1067,6 +1074,22 @@ bool EarlyIfConverter::shouldConvertIf() {
                });
       }))
     return false;
+
+  // If we have a high probability (>50%) of jumping to either TBB or FBB don't
+  // if convert. We assume that likely taken branches will be easier
+  // to predict.
+  LLVM_DEBUG(dbgs() << "Edge probabilities: Head->TBB = "
+                    << MBPI->getEdgeProbability(IfConv.Head, IfConv.TBB)
+                    << ", Head->FBB = "
+                    << MBPI->getEdgeProbability(IfConv.Head, IfConv.FBB)
+                    << "\n");
+  BranchProbability Threshold(1, 2); // 50%
+  if (MBPI->getEdgeProbability(IfConv.Head, IfConv.TBB) > Threshold ||
+      MBPI->getEdgeProbability(IfConv.Head, IfConv.FBB) > Threshold) {
+    LLVM_DEBUG(dbgs() << "Branch probability exceeds 50% threshold\n");
+    ++NumLikelyBiased;
+    return false;
+  }
 
   if (!MinInstr)
     MinInstr = Traces->getEnsemble(MachineTraceStrategy::TS_MinInstrCount);

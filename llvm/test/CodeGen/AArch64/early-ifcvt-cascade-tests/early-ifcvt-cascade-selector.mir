@@ -1,0 +1,101 @@
+# RUN: llc -mtriple=aarch64 -mcpu=apple-m1 -run-pass=early-ifcvt -o - %s | FileCheck %s
+
+# Current behavior: NOT converted
+# CHECK-LABEL: name: cascade_selector
+# CHECK: bb.0
+# CHECK: Bcc
+# CHECK: bb.1
+# CHECK: Bcc
+# CHECK: bb.2
+# CHECK: Bcc
+# CHECK: bb.3
+# CHECK: Bcc
+# CHECK: bb.4
+# CHECK: Bcc
+# CHECK: bb.5
+# CHECK: Bcc
+# CHECK: bb.7
+# CHECK: PHI
+
+--- |
+  define i32 @cascade_selector(i32 %a, i32 %b, i32 %c) {
+    ret i32 0
+  }
+...
+---
+name:            cascade_selector
+alignment:       4
+tracksRegLiveness: true
+liveins:
+  - { reg: '$w0', virtual-reg: '%0' }
+  - { reg: '$w1', virtual-reg: '%1' }
+  - { reg: '$w2', virtual-reg: '%2' }
+body:             |
+  bb.0:
+    successors: %bb.7(0x40000000), %bb.1(0x40000000)
+    liveins: $w0, $w1, $w2
+
+    %0:gpr32 = COPY $w0
+    %1:gpr32 = COPY $w1
+    %2:gpr32 = COPY $w2
+    %30:gpr32 = MADDWrrr %0, %1, $wzr
+    %31:gpr32 = MADDWrrr %30, %2, $wzr
+    %32:gpr32 = MADDWrrr %31, %0, $wzr
+    %33:gpr32 = MADDWrrr %32, %1, $wzr
+    %38:gpr32common = ADDWrr %33, %2
+    %40:gpr32 = MOVi32imm 42
+    %41:gpr32 = SUBSWri %38, 1, 0, implicit-def $nzcv
+    Bcc 12, %bb.7, implicit $nzcv
+    B %bb.1
+
+  bb.1:
+    successors: %bb.7(0x40000000), %bb.2(0x40000000)
+
+    %42:gpr32 = MOVi32imm 43
+    %43:gpr32 = SUBSWri %38, 2, 0, implicit-def $nzcv
+    Bcc 12, %bb.7, implicit $nzcv
+    B %bb.2
+
+  bb.2:
+    successors: %bb.7(0x40000000), %bb.3(0x40000000)
+
+    %44:gpr32 = MOVi32imm 44
+    %45:gpr32 = SUBSWri %38, 3, 0, implicit-def $nzcv
+    Bcc 12, %bb.7, implicit $nzcv
+    B %bb.3
+
+  bb.3:
+    successors: %bb.7(0x40000000), %bb.4(0x40000000)
+
+    %46:gpr32 = MOVi32imm 45
+    %47:gpr32 = SUBSWri %38, 4, 0, implicit-def $nzcv
+    Bcc 12, %bb.7, implicit $nzcv
+    B %bb.4
+
+  bb.4:
+    successors: %bb.7(0x40000000), %bb.5(0x40000000)
+
+    %48:gpr32 = MOVi32imm 46
+    %49:gpr32 = SUBSWri %38, 5, 0, implicit-def $nzcv
+    Bcc 12, %bb.7, implicit $nzcv
+    B %bb.5
+
+  bb.5:
+    successors: %bb.7(0x40000000), %bb.6(0x40000000)
+
+    %50:gpr32 = MOVi32imm 47
+    %51:gpr32 = SUBSWri %38, 6, 0, implicit-def $nzcv
+    Bcc 12, %bb.7, implicit $nzcv
+    B %bb.6
+
+  bb.6:
+    successors: %bb.7(0x80000000)
+
+    %52:gpr32 = SUBSWri %38, 7, 0, implicit-def $nzcv
+    %53:gpr32 = CSINCWr $wzr, $wzr, 13, implicit $nzcv
+
+  bb.7:
+    %100:gpr32 = PHI %40, %bb.0, %42, %bb.1, %44, %bb.2, %46, %bb.3, %48, %bb.4, %50, %bb.5, %53, %bb.6
+    $w0 = COPY %100
+    RET_ReallyLR implicit $w0
+...
