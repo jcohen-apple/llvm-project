@@ -991,11 +991,12 @@ bool EarlyIfConverter::isConditionDataDependent() {
   if (!MBP.ConditionDef)
     return false;
 
-  // If we have a high probability of jumping to either TBB or FBB don't
-  // if convert. We assume that likely taken branches will be easier
-  // to predict.
-  if (MBPI->isEdgeHot(IfConv.Head, IfConv.TBB) ||
-      MBPI->isEdgeHot(IfConv.Head, IfConv.FBB)) {
+  // If the branch is biased (not 50/50), don't consider it data dependent.
+  // This is to prevent converting unprofitable checks such as
+  // `x[i] != 0;`
+  auto TBBProb = MBPI->getEdgeProbability(IfConv.Head, IfConv.TBB);
+  auto FBBProb = MBPI->getEdgeProbability(IfConv.Head, IfConv.FBB);
+  if (TBBProb != FBBProb) {
     ++NumLikelyBiased;
     return false;
   }

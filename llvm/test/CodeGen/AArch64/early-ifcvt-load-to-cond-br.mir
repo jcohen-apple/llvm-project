@@ -476,7 +476,7 @@ tracksRegLiveness: true
 body:             |
   ; CHECK-LABEL: name: hot_branch_load_to_cond_branch
   ; CHECK: bb.0:
-  ; CHECK-NEXT:   successors: %bb.1(0x10000000), %bb.2(0x70000000)
+  ; CHECK-NEXT:   successors: %bb.1(0x30000000), %bb.2(0x50000000)
   ; CHECK-NEXT:   liveins: $x0, $w1, $w2
   ; CHECK-NEXT: {{  $}}
   ; CHECK-NEXT:   [[COPY:%[0-9]+]]:gpr64common = COPY $x0
@@ -498,7 +498,7 @@ body:             |
   ; CHECK-NEXT:   $w0 = COPY [[PHI]]
   ; CHECK-NEXT:   RET_ReallyLR implicit $w0
   bb.0:
-    successors: %bb.1(0x10000000), %bb.2(0x70000000)
+    successors: %bb.1(0x30000000), %bb.2(0x50000000)
     liveins: $x0, $w1, $w2
 
     %0:gpr64common = COPY $x0
