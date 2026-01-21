@@ -71,19 +71,19 @@ body:             |
     %0:gpr32common = COPY $w0
     %1:gpr32 = COPY $w1
     %2:gpr32 = COPY $w2
-    %11:gpr32 = SUBSWri %0, 100, 0, implicit-def $nzcv
+    %3:gpr32 = SUBSWri %0, 100, 0, implicit-def $nzcv
     Bcc 12, %bb.3, implicit $nzcv
     B %bb.2
 
   bb.2:
     successors: %bb.3(0x80000000)
 
-    %20:gpr32 = MADDWrrr %1, %2, $wzr
-    %21:gpr32 = MADDWrrr %20, %1, $wzr
+    %4:gpr32 = MADDWrrr %1, %2, $wzr
+    %5:gpr32 = MADDWrrr %4, %1, $wzr
 
   bb.3:
-    %100:gpr32 = PHI %1, %bb.1, %21, %bb.2
-    $w0 = COPY %100
+    %6:gpr32 = PHI %1, %bb.1, %5, %bb.2
+    $w0 = COPY %6
     RET_ReallyLR implicit $w0
 ...
 ---
@@ -127,20 +127,20 @@ body:             |
     %1:gpr32 = COPY $w1
     %2:gpr32 = COPY $w2
     renamable $x8 = ADRP target-flags(aarch64-page) %const.0
-    %10:gpr32common = LDRWui killed renamable $x8, target-flags(aarch64-pageoff, aarch64-nc) %const.0 :: (load (s32) from constant-pool)
-    %11:gpr32 = SUBSWrr %0, %10, implicit-def $nzcv
+    %3:gpr32common = LDRWui killed renamable $x8, target-flags(aarch64-pageoff, aarch64-nc) %const.0 :: (load (s32) from constant-pool)
+    %4:gpr32 = SUBSWrr %0, %3, implicit-def $nzcv
     Bcc 12, %bb.2, implicit $nzcv
     B %bb.1
 
   bb.1:
     successors: %bb.2(0x80000000)
 
-    %20:gpr32 = MADDWrrr %1, %2, $wzr
-    %21:gpr32 = MADDWrrr %20, %1, $wzr
+    %5:gpr32 = MADDWrrr %1, %2, $wzr
+    %6:gpr32 = MADDWrrr %5, %1, $wzr
 
   bb.2:
-    %100:gpr32 = PHI %1, %bb.0, %21, %bb.1
-    $w0 = COPY %100
+    %7:gpr32 = PHI %1, %bb.0, %6, %bb.1
+    $w0 = COPY %7
     RET_ReallyLR implicit $w0
 ...
 ---
@@ -178,22 +178,22 @@ body:             |
     successors: %bb.1(0x40000000), %bb.2(0x40000000)
     liveins: $w0, $w1
 
-    %1:gpr32 = COPY $w0
-    %2:gpr32 = COPY $w1
+    %0:gpr32 = COPY $w0
+    %1:gpr32 = COPY $w1
     renamable $x8 = ADRP target-flags(aarch64-page) %const.0
-    %10:gpr32common = LDRWui killed renamable $x8, target-flags(aarch64-pageoff, aarch64-nc) %const.0 :: (load (s32) from constant-pool)
-    CBZW %10, %bb.2
+    %2:gpr32common = LDRWui killed renamable $x8, target-flags(aarch64-pageoff, aarch64-nc) %const.0 :: (load (s32) from constant-pool)
+    CBZW %2, %bb.2
     B %bb.1
 
   bb.1:
     successors: %bb.2(0x80000000)
 
-    %20:gpr32 = MADDWrrr %1, %2, $wzr
-    %21:gpr32 = MADDWrrr %20, %1, $wzr
+    %3:gpr32 = MADDWrrr %0, %1, $wzr
+    %4:gpr32 = MADDWrrr %3, %0, $wzr
 
   bb.2:
-    %100:gpr32 = PHI %1, %bb.0, %21, %bb.1
-    $w0 = COPY %100
+    %5:gpr32 = PHI %0, %bb.0, %4, %bb.1
+    $w0 = COPY %5
     RET_ReallyLR implicit $w0
 ...
 ---
@@ -222,20 +222,20 @@ body:             |
     %0:gpr64common = COPY $x0
     %1:gpr32 = COPY $w1
     %2:gpr32 = COPY $w2
-    %10:gpr32common = LDRWui %0, 0 :: (load (s32))
-    %11:gpr32 = SUBSWri %10, 100, 0, implicit-def $nzcv
+    %3:gpr32common = LDRWui %0, 0 :: (load (s32))
+    %4:gpr32 = SUBSWri %3, 100, 0, implicit-def $nzcv
     Bcc 12, %bb.3, implicit $nzcv
     B %bb.2
 
   bb.2:
     successors: %bb.3(0x80000000)
 
-    %20:gpr32 = MADDWrrr %1, %2, $wzr
-    %21:gpr32 = MADDWrrr %20, %1, $wzr
+    %5:gpr32 = MADDWrrr %1, %2, $wzr
+    %6:gpr32 = MADDWrrr %5, %1, $wzr
 
   bb.3:
-    %100:gpr32 = PHI %1, %bb.1, %21, %bb.2
-    $w0 = COPY %100
+    %7:gpr32 = PHI %1, %bb.1, %6, %bb.2
+    $w0 = COPY %7
     RET_ReallyLR implicit $w0
 ...
 ---
@@ -278,12 +278,12 @@ body:             |
   bb.1:
     successors: %bb.2(0x80000000)
 
-    %20:gpr32 = MADDWrrr %1, %2, $wzr
-    %21:gpr32 = MADDWrrr %20, %1, $wzr
+    %3:gpr32 = MADDWrrr %1, %2, $wzr
+    %4:gpr32 = MADDWrrr %3, %1, $wzr
 
   bb.2:
-    %100:gpr32 = PHI %1, %bb.0, %21, %bb.1
-    $w0 = COPY %100
+    %5:gpr32 = PHI %1, %bb.0, %4, %bb.1
+    $w0 = COPY %5
     RET_ReallyLR implicit $w0
 ...
 ---
@@ -313,19 +313,19 @@ body:             |
     %0:gpr64common = COPY $x0
     %1:gpr32 = COPY $w1
     %2:gpr32 = COPY $w2
-    %10:gpr32 = LDRWui %0, 0 :: (load (s32))
-    CBZW %10, %bb.2
+    %3:gpr32 = LDRWui %0, 0 :: (load (s32))
+    CBZW %3, %bb.2
     B %bb.1
 
   bb.1:
     successors: %bb.2(0x80000000)
 
-    %20:gpr32 = MADDWrrr %1, %2, $wzr
-    %21:gpr32 = MADDWrrr %20, %1, $wzr
+    %4:gpr32 = MADDWrrr %1, %2, $wzr
+    %5:gpr32 = MADDWrrr %4, %1, $wzr
 
   bb.2:
-    %100:gpr32 = PHI %1, %bb.0, %21, %bb.1
-    $w0 = COPY %100
+    %6:gpr32 = PHI %1, %bb.0, %5, %bb.1
+    $w0 = COPY %6
     RET_ReallyLR implicit $w0
 
 ...
@@ -369,12 +369,12 @@ body:             |
   bb.1:
     successors: %bb.2(0x80000000)
 
-    %20:gpr32 = MADDWrrr %1, %2, $wzr
-    %21:gpr32 = MADDWrrr %20, %1, $wzr
+    %3:gpr32 = MADDWrrr %1, %2, $wzr
+    %4:gpr32 = MADDWrrr %3, %1, $wzr
 
   bb.2:
-    %100:gpr32 = PHI %1, %bb.0, %21, %bb.1
-    $w0 = COPY %100
+    %5:gpr32 = PHI %1, %bb.0, %4, %bb.1
+    $w0 = COPY %5
     RET_ReallyLR implicit $w0
 ...
 ---
@@ -404,19 +404,19 @@ body:             |
     %0:gpr64common = COPY $x0
     %1:gpr32 = COPY $w1
     %2:gpr32 = COPY $w2
-    %10:gpr32 = LDRWui %0, 0 :: (load (s32))
-    TBZW %10, 0, %bb.2
+    %3:gpr32 = LDRWui %0, 0 :: (load (s32))
+    TBZW %3, 0, %bb.2
     B %bb.1
 
   bb.1:
     successors: %bb.2(0x80000000)
 
-    %20:gpr32 = MADDWrrr %1, %2, $wzr
-    %21:gpr32 = MADDWrrr %20, %1, $wzr
+    %4:gpr32 = MADDWrrr %1, %2, $wzr
+    %5:gpr32 = MADDWrrr %4, %1, $wzr
 
   bb.2:
-    %100:gpr32 = PHI %1, %bb.0, %21, %bb.1
-    $w0 = COPY %100
+    %6:gpr32 = PHI %1, %bb.0, %5, %bb.1
+    $w0 = COPY %6
     RET_ReallyLR implicit $w0
 ...
 ---
@@ -451,22 +451,22 @@ body:             |
     %0:gpr64common = COPY $x0
     %1:gpr32 = COPY $w1
     %2:gpr32 = COPY $w2
-    %10:gpr32 = LDRWui %0, 0 :: (load (s32))
+    %3:gpr32 = LDRWui %0, 0 :: (load (s32))
     renamable $x8 = ADRP target-flags(aarch64-page) %const.0
-    %11:gpr32common = LDRWui killed renamable $x8, target-flags(aarch64-pageoff, aarch64-nc) %const.0 :: (load (s32) from constant-pool)
-    %12:gpr32 = SUBSWrr %10, %11, implicit-def $nzcv
+    %4:gpr32common = LDRWui killed renamable $x8, target-flags(aarch64-pageoff, aarch64-nc) %const.0 :: (load (s32) from constant-pool)
+    %5:gpr32 = SUBSWrr %3, %4, implicit-def $nzcv
     Bcc 12, %bb.2, implicit $nzcv
     B %bb.1
 
   bb.1:
     successors: %bb.2(0x80000000)
 
-    %20:gpr32 = MADDWrrr %1, %2, $wzr
-    %21:gpr32 = MADDWrrr %20, %1, $wzr
+    %6:gpr32 = MADDWrrr %1, %2, $wzr
+    %7:gpr32 = MADDWrrr %6, %1, $wzr
 
   bb.2:
-    %100:gpr32 = PHI %1, %bb.0, %21, %bb.1
-    $w0 = COPY %100
+    %8:gpr32 = PHI %1, %bb.0, %7, %bb.1
+    $w0 = COPY %8
     RET_ReallyLR implicit $w0
 ...
 ---
@@ -504,20 +504,20 @@ body:             |
     %0:gpr64common = COPY $x0
     %1:gpr32 = COPY $w1
     %2:gpr32 = COPY $w2
-    %10:gpr32common = LDRWui %0, 0 :: (load (s32))
-    %11:gpr32 = SUBSWri %10, 100, 0, implicit-def $nzcv
+    %3:gpr32common = LDRWui %0, 0 :: (load (s32))
+    %4:gpr32 = SUBSWri %3, 100, 0, implicit-def $nzcv
     Bcc 12, %bb.2, implicit $nzcv
     B %bb.1
 
   bb.1:
     successors: %bb.2(0x80000000)
 
-    %20:gpr32 = MADDWrrr %1, %2, $wzr
-    %21:gpr32 = MADDWrrr %20, %1, $wzr
+    %5:gpr32 = MADDWrrr %1, %2, $wzr
+    %6:gpr32 = MADDWrrr %5, %1, $wzr
 
   bb.2:
-    %100:gpr32 = PHI %1, %bb.0, %21, %bb.1
-    $w0 = COPY %100
+    %7:gpr32 = PHI %1, %bb.0, %6, %bb.1
+    $w0 = COPY %7
     RET_ReallyLR implicit $w0
 ...
 ---
@@ -555,18 +555,18 @@ body:             |
     %0:gpr64common = COPY $x0
     %1:gpr32 = COPY $w1
     %2:gpr32 = COPY $w2
-    %10:gpr32common = LDRWui %0, 0 :: (dereferenceable invariant load (s32))
-    %11:gpr32 = SUBSWri %10, 100, 0, implicit-def $nzcv
+    %3:gpr32common = LDRWui %0, 0 :: (dereferenceable invariant load (s32))
+    %4:gpr32 = SUBSWri %3, 100, 0, implicit-def $nzcv
     Bcc 12, %bb.2, implicit $nzcv
     B %bb.1
 
   bb.1:
     successors: %bb.2(0x80000000)
 
-    %20:gpr32 = MADDWrrr %1, %2, $wzr
-    %21:gpr32 = MADDWrrr %20, %1, $wzr
+    %5:gpr32 = MADDWrrr %1, %2, $wzr
+    %6:gpr32 = MADDWrrr %5, %1, $wzr
 
   bb.2:
-    %100:gpr32 = PHI %1, %bb.0, %21, %bb.1
-    $w0 = COPY %100
+    %7:gpr32 = PHI %1, %bb.0, %6, %bb.1
+    $w0 = COPY %7
     RET_ReallyLR implicit $w0
